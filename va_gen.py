@@ -21,6 +21,7 @@ class Signal:
         self.signal_name    = 'signal_{}'.format(self.name)
         self.count_name     = 'count_{}'.format(self.name)
         self.wave_name      = "wave_{}".format(self.name)
+        self.is_bus         = self.width > 1
         
         self.width_declaration      = self.get_width_declaration()
         self.length_declaration     = self.get_length_declaration()
@@ -54,6 +55,8 @@ class Signal:
         return template.format(arg_1, arg_2, arg_1, arg_2)
     
     def get_signal_declaration(self):
+        if self.is_bus:
+            return ''
         template = '    integer {} ;'
 
         return template.format(self.signal_name)
@@ -64,22 +67,28 @@ class Signal:
         return template.format(self.count_name)
 
     def get_wavelist_declaration(self):
-        template = '    integer {} {} = {} ;'
-        arg_1 = self.wave_name
-        arg_2 = self.length_declaration
-        arg_3 = ''
-
-        if len(self.waves) > 0 :
-            arg_3 = arg_3 + '{ '
-            for i in self.waves:
-                arg_3 = arg_3 + ' {},'.format(i)
-            arg_3 = arg_3 + ' }'
-        else:
+        if len(self.waves) == 0:
             print('ERROR!!! The length of the wave list = 0 !!!')
+            return ''
 
-        return template.format(arg_1, arg_2, arg_3)
+        if not self.is_bus:
+            template = '    integer {} {} = {} ;'
+            arg_1 = self.wave_name
+            arg_2 = self.length_declaration
+            values = ', '.join(str(i) for i in self.waves)
+            arg_3 = '{ ' + values + ' }'
+            return template.format(arg_1, arg_2, arg_3)
+
+        lines = []
+        for bit in range(self.width):
+            values = ', '.join(str((int(w) >> bit) & 1) for w in self.waves)
+            bit_values = '{ ' + values + ' }'
+            lines.append('    integer {}_b{} {} = {} ;'.format(self.wave_name, bit, self.length_declaration, bit_values))
+        return '\n'.join(lines)
 
     def get_signal_initial(self):
+        if self.is_bus:
+            return ''
         template = '            {} = 0 ;'
         return template.format(self.signal_name)
     
@@ -88,6 +97,8 @@ class Signal:
         return template.format(self.count_name)
 
     def get_signal_generate(self):
+        if self.is_bus:
+            return ''
         template = '            {} = {}[ {} % {} ] ;'
         arg_1 = self.signal_name
         arg_2 = self.wave_name
@@ -102,9 +113,17 @@ class Signal:
         return template.format(self.count_name, self.count_name)
 
     def get_signal_output(self):
+        if self.is_bus:
+            result = ''
+            for bit in range(self.width):
+                result += '        V( {}[{}] ) <+ V(VDD,GND)*transition( {}_b{}[ {} % {} ], 0, 0 ) ;\n'.format(
+                    self.name, bit, self.wave_name, bit, self.count_name, self.length
+                )
+            return '\n' + result
+
         template = '''
         for(i=0; i<{}; i=i+1) begin
-            V( {} ) <+ transition( V(VDD,GND)*(({}&(1<<i))>>i), 0, 0 ) ;
+            V( {} ) <+ V(VDD,GND)*transition( (({}&(1<<i))>>i), 0, 0 ) ;
         end
         '''
         arg_1 = self.width
@@ -117,9 +136,17 @@ class Signal:
         return template.format(arg_1, arg_2, arg_3)
 
     def get_signal_grouped_output(self, bus_name, bus_offset ):
+        if self.is_bus:
+            result = ''
+            for bit in range(self.width):
+                result += '        V( {}[{}+{}] ) <+ V(VDD,GND)*transition( {}_b{}[ {} % {} ], 0, 0 ) ;\n'.format(
+                    bus_name, bus_offset, bit, self.wave_name, bit, self.count_name, self.length
+                )
+            return '\n' + result
+
         template = '''
         for(i=0; i<{}; i=i+1) begin
-            V( {}[{}+i] ) <+ transition( V(VDD,GND)*(({}&(1<<i))>>i), 0, 0 ) ;
+            V( {}[{}+i] ) <+ V(VDD,GND)*transition( (({}&(1<<i))>>i), 0, 0 ) ;
         end
         '''
         arg_1 = self.width
@@ -197,7 +224,8 @@ class MultiSignal:
     def get_signal_declaration(self):
         result = ''
         for i in self.signals:
-            result = result + i.signal_declaration +'\n'
+            if i.signal_declaration:
+                result = result + i.signal_declaration +'\n'
         return result
 
     def get_count_declaration(self):
@@ -215,7 +243,8 @@ class MultiSignal:
     def get_signal_initial(self):
         result = ''
         for i in self.signals:
-            result = result + i.signal_initial +'\n'
+            if i.signal_initial:
+                result = result + i.signal_initial +'\n'
         return result
 
     def get_count_initial(self):
@@ -227,7 +256,8 @@ class MultiSignal:
     def get_signal_generate(self):
         result = ''
         for i in self.signals:
-            result = result + i.signal_generate +'\n'
+            if i.signal_generate:
+                result = result + i.signal_generate +'\n'
         return result
 
     def get_count_generate(self):
